@@ -170,3 +170,4 @@ export async function rejectNote(db: PrismaClient, noteId: string, userId: strin
     db.auditLog.create({ data: { orgId: note.user.orgId, userId, action: "voice_note.rejected", entity: "VoiceNote", entityId: noteId } }),
   ]);
 }
+

@@ -1,25 +1,19 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { createSession, demoModeEnabled, destroySession } from "@/lib/auth";
 
+/** Connexion par choix de profil — uniquement en mode démo. */
 export async function loginAs(formData: FormData) {
-  if (process.env.DEMO_MODE === "false") throw new Error("Connexion démo désactivée");
-  const user = await db.user.findUnique({ where: { id: String(formData.get("userId")) } });
+  if (!demoModeEnabled()) redirect("/login");
+  const user = await db.user.findFirst({ where: { id: String(formData.get("userId")), active: true } });
   if (!user) redirect("/login");
-  (await cookies()).set(SESSION_COOKIE, user.id, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30,
-  });
+  await createSession(user.id, "DEMO");
   redirect(user.role === "SALES" ? "/app" : "/direction");
 }
 
 export async function logout() {
-  (await cookies()).delete(SESSION_COOKIE);
+  await destroySession();
   redirect("/login");
 }

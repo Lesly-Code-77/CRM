@@ -2,7 +2,7 @@
 
 Application mobile (PWA) qui transforme la note vocale d'un commercial, dictée après une visite client, en **brouillon d'email Outlook**, **tâches** et **fiche client à jour**. Le commercial valide avant toute exécution. Un **espace direction** suit l'activité de l'équipe et permet de confier des tâches.
 
-> État actuel : **socle MVP en mode démo**. La connexion Microsoft 365 et l'IA sont simulées ; tout le reste (base de données, écrans, validation, tâches, tableau de bord) est réel.
+> État actuel : socle MVP. La **connexion Microsoft 365** et la création des **brouillons Outlook** sont branchées ; la transcription et l'IA sont encore simulées. Un mode démo (profils fictifs) permet de tester sans compte Microsoft.
 
 ## Démarrer en local
 
@@ -28,6 +28,27 @@ Commandes utiles :
 | `npx prisma studio` | explorer les données dans le navigateur |
 | `npm run lint` / `npm run typecheck` | vérifications |
 
+## Connexion Microsoft 365 (Entra ID)
+
+1. **Azure → Microsoft Entra ID → App registrations → New registration**
+   - Types de comptes : *Accounts in any organizational directory (Multitenant)*
+   - Redirect URI : plateforme **Web**, `http://localhost:3000/api/auth/callback` (ajouter plus tard l'URL de production)
+2. **Certificates & secrets** → nouveau secret. **API permissions** → Microsoft Graph, *Delegated* : `User.Read`, `Calendars.Read`, `Mail.ReadWrite`, `Contacts.Read`, `offline_access`.
+3. Dans `.env` : `AZURE_AD_CLIENT_ID` (Application ID) et `AZURE_AD_CLIENT_SECRET` (valeur du secret). Redémarrer `npm run dev`.
+4. Relier l'organisation à votre Microsoft 365 et donner accès à votre compte :
+
+```bash
+npm run admin -- locataire <Directory (tenant) ID>
+npm run admin -- utilisateur prenom.nom@votre-domaine.fr "Prénom Nom" MANAGER   # ou SALES
+npm run admin -- liste
+```
+
+Seuls les comptes ajoutés ainsi peuvent entrer (le premier login rattache l'identifiant Microsoft au compte). En cas de refus, la page de connexion affiche le locataire et l'email reçus de Microsoft, à copier dans les commandes ci-dessus.
+
+Chez un client, un administrateur Microsoft 365 devra peut-être donner son **consentement administrateur** à SalesFlow (lien affiché par Microsoft lors de la première connexion).
+
+**Sécurité :** le cookie de session contient un jeton aléatoire, seule son empreinte est stockée en base (table `Session`). Les jetons Microsoft sont gardés côté serveur (table `MsalCache`), jamais dans le navigateur. SalesFlow n'a pas la permission `Mail.Send` : il crée des brouillons, l'utilisateur envoie lui-même depuis Outlook.
+
 ## Parcours
 
 **Commercial (mobile)** — `/app`
@@ -48,7 +69,11 @@ prisma/schema.prisma        modèle de données (multi-client, identifiants F&O)
 prisma/seed.ts              données de démo
 src/lib/ai/                 contrat JSON de l'IA (schema.ts), analyse simulée (mock.ts), point d'entrée (analyze.ts)
 src/lib/notes.ts            création d'une note analysée, validation, rejet (logique métier)
-src/lib/auth.ts             session (démo) — à remplacer par Entra ID
+src/lib/auth.ts             sessions (cookie + table Session)
+src/lib/msal.ts             connexion Microsoft, cache de jetons en base
+src/lib/graph.ts            appels Microsoft Graph (brouillons Outlook)
+src/app/api/auth/…          routes de connexion / retour Microsoft
+prisma/admin.ts             outil admin : relier un locataire, ajouter des utilisateurs
 src/app/app/…               écrans mobiles commerciaux
 src/app/direction/…         espace direction
 src/app/actions/…           actions serveur (formulaires)
@@ -58,10 +83,10 @@ src/app/actions/…           actions serveur (formulaires)
 
 | Élément | Aujourd'hui | À faire |
 |---|---|---|
-| Connexion | choix du profil (`src/lib/auth.ts`, cookie) | Entra ID via MSAL / Auth.js, rôle depuis les groupes Entra |
+| Connexion | ✅ Entra ID (MSAL, `src/lib/msal.ts`) + profils démo | écran d'administration des utilisateurs |
 | Transcription | texte d'exemple modifiable (`NoteRecorder`) | envoi de l'audio à un service UE, suppression de l'audio après transcription |
 | Analyse IA | règles par mots-clés (`src/lib/ai/mock.ts`) | appel LLM avec sortie JSON conforme à `analysisSchema` dans `analyze.ts` |
-| Email | enregistré comme « validé » | `POST /me/messages` (Graph, Mail.ReadWrite) → brouillon Outlook, jamais d'envoi |
+| Email | ✅ brouillon Outlook via Graph (`src/lib/graph.ts`) si connecté avec Microsoft | — |
 | Agenda | visites en base | synchronisation `Calendars.Read` |
 | ERP | n° de compte et références articles F&O stockés | lecture seule Dynamics 365 F&O (phase 2) |
 
@@ -70,4 +95,6 @@ src/app/actions/…           actions serveur (formulaires)
 - Azure Database for PostgreSQL – Flexible Server (France Central) → `DATABASE_URL`.
 - Azure App Service (Node 20) ou Container Apps : `npm run build`, puis `npm run db:deploy` et `npm start`.
 - Définir `TZ=Europe/Paris` pour que « aujourd'hui » corresponde à l'heure française.
-- `DEMO_MODE=false` une fois Entra ID branché (désactive la connexion par choix de profil).
+- `DEMO_MODE=false` en production (désactive la connexion par profils fictifs).
+- `APP_URL=https://…` et ajouter `https://…/api/auth/callback` dans les Redirect URIs de l'App registration.
+- En local, utiliser `npm run dev` : en mode `npm start`, les cookies sont marqués *Secure* et exigent HTTPS (sauf sur localhost).

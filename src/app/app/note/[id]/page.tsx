@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { getSession, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { PageHeader } from "@/components/PageHeader";
-import { confirmNote, discardNote } from "@/app/actions/sales";
+import { confirmNote, discardNote, retryOutlookDraft } from "@/app/actions/sales";
 import { ACCOUNT_STATUS, fmtDate, fmtDuration, PRIORITY } from "@/lib/format";
 
 export const metadata = { title: "Validation" };
@@ -16,7 +16,8 @@ function displayValue(field: string, v: string | null) {
 export default async function NotePage({ params, searchParams }: PageProps<"/app/note/[id]">) {
   const user = await requireUser("sales");
   const { id } = await params;
-  const { ok } = await searchParams;
+  const { ok, outlook } = await searchParams;
+  const microsoft = (await getSession())?.method === "MICROSOFT";
   const note = await db.voiceNote.findFirst({
     where: { id, userId: user.id },
     include: {
@@ -43,7 +44,7 @@ export default async function NotePage({ params, searchParams }: PageProps<"/app
             <div className="rounded-2xl bg-emerald-600 p-4 text-white">
               <p className="font-semibold">C&apos;est validé ✓</p>
               <p className="text-sm text-white/90">
-                {email?.status === "VALIDE" ? "Brouillon d'email prêt" : "Pas d'email"} · {keptTasks.length} tâche{keptTasks.length > 1 ? "s" : ""} créée
+                {email?.status === "BROUILLON_OUTLOOK" ? "Brouillon déposé dans Outlook" : email?.status === "VALIDE" ? "Email validé" : "Pas d'email"} · {keptTasks.length} tâche{keptTasks.length > 1 ? "s" : ""} créée
                 {keptTasks.length > 1 ? "s" : ""} · fiche client {keptUpdates.length ? "mise à jour" : "inchangée"}
               </p>
             </div>
@@ -58,10 +59,26 @@ export default async function NotePage({ params, searchParams }: PageProps<"/app
               <p className="label mb-1">Email · {email.status === "BROUILLON_OUTLOOK" ? "dans vos brouillons Outlook" : "validé"}</p>
               <p className="text-sm font-medium">{email.subject}</p>
               <p className="mt-2 text-sm whitespace-pre-line text-zinc-700">{email.body}</p>
-              {email.status === "VALIDE" && (
+              {email.status === "BROUILLON_OUTLOOK" && email.graphWebLink && (
+                <a href={email.graphWebLink} target="_blank" rel="noreferrer" className="btn-ghost mt-3 w-full">Ouvrir dans Outlook</a>
+              )}
+              {email.status === "VALIDE" && !microsoft && (
                 <p className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
-                  Mode démo : le brouillon sera déposé dans Outlook quand la connexion Microsoft 365 sera activée. SalesFlow n&apos;envoie jamais d&apos;email lui-même.
+                  Mode démo : le brouillon sera déposé dans Outlook une fois connecté avec Microsoft 365. SalesFlow n&apos;envoie jamais d&apos;email lui-même.
                 </p>
+              )}
+              {email.status === "VALIDE" && microsoft && (
+                <div className="mt-3 space-y-2">
+                  {outlook === "no-token" && (
+                    <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">Votre connexion Microsoft a expiré. Déconnectez-vous puis reconnectez-vous, et réessayez.</p>
+                  )}
+                  {outlook === "error" && (
+                    <p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-800">Outlook n&apos;a pas accepté le brouillon. Réessayez dans un instant.</p>
+                  )}
+                  <form action={retryOutlookDraft.bind(null, note.id)}>
+                    <button className="btn-primary w-full">Créer le brouillon dans Outlook</button>
+                  </form>
+                </div>
               )}
             </section>
           )}

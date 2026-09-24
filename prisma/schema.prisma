@@ -50,8 +50,37 @@ model User {
   tasksAssigned Task[]       @relation("TaskAssignee")
   tasksCreated  Task[]       @relation("TaskCreator")
   auditLogs     AuditLog[]
+  sessions      Session[]
 
   @@unique([orgId, email])
+}
+
+// ───────────────────────────── Sessions & jetons Microsoft ─────────────────────────────
+
+enum AuthMethod {
+  DEMO       // choix de profil (développement / démonstration)
+  MICROSOFT  // connexion Entra ID
+}
+
+model Session {
+  id                String     @id @default(cuid())
+  tokenHash         String     @unique // SHA-256 du jeton du cookie (le jeton lui-même n'est jamais stocké)
+  userId            String
+  method            AuthMethod
+  msalHomeAccountId String?    // clé du cache de jetons MSAL de l'utilisateur
+  expiresAt         DateTime
+  createdAt         DateTime   @default(now())
+
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Cache de jetons MSAL (un enregistrement par compte Microsoft), chiffré au repos par la base.
+model MsalCache {
+  key       String   @id // homeAccountId
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 // ───────────────────────────── Clients (revendeurs) ─────────────────────────────
@@ -218,6 +247,7 @@ model EmailDraft {
   body           String
   status         EmailDraftStatus @default(PROPOSE)
   graphMessageId String?
+  graphWebLink   String?          // lien « ouvrir dans Outlook »
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 

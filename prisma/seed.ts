@@ -25,9 +25,15 @@ today.setHours(0, 0, 0, 0);
 const at = (days: number, hour = 10, minute = 0) => new Date(today.getTime() + days * DAY + (hour * 60 + minute) * 60 * 1000);
 
 async function main() {
+  // On conserve le lien avec le locataire Microsoft et les comptes ajoutés à la main (npm run admin)
+  const previous = await db.organization.findFirst({ where: { name: "Démo Sportswear" }, include: { users: true } });
+  const extraUsers = (previous?.users ?? []).filter((u) => !u.email.endsWith("@demo-sportswear.example"));
   await db.organization.deleteMany({ where: { name: "Démo Sportswear" } });
 
-  const org = await db.organization.create({ data: { name: "Démo Sportswear" } });
+  const org = await db.organization.create({ data: { name: "Démo Sportswear", entraTenantId: previous?.entraTenantId ?? null } });
+  for (const u of extraUsers) {
+    await db.user.create({ data: { orgId: org.id, email: u.email, name: u.name, role: u.role, entraObjectId: u.entraObjectId } });
+  }
 
   // ── Utilisateurs : 3 commerciaux + 2 accès direction (format du pilote)
   const mk = (name: string, email: string, role: "SALES" | "MANAGER", region?: string) =>

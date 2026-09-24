@@ -2,12 +2,28 @@ import { connection } from "next/server";
 import { db } from "@/lib/db";
 import { loginAs } from "@/app/actions/auth";
 import { initials } from "@/lib/format";
+import { demoModeEnabled } from "@/lib/auth";
+import { microsoftConfigured } from "@/lib/msal";
+
+const ERRORS: Record<string, string> = {
+  config: "La connexion Microsoft n'est pas encore configurée (variables AZURE_AD_* manquantes).",
+  refus: "Connexion annulée.",
+  session: "La connexion a expiré, veuillez réessayer.",
+  microsoft: "Microsoft n'a pas pu confirmer la connexion. Réessayez ou contactez votre administrateur.",
+  organisation: "Votre organisation n'est pas encore inscrite sur SalesFlow.",
+  utilisateur: "Votre compte n'a pas encore accès à SalesFlow. Demandez à votre responsable de vous ajouter.",
+};
 
 export const metadata = { title: "Connexion" };
 
-export default async function LoginPage() {
+export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   await connection(); // rendu à chaque requête (la liste vient de la base)
-  const users = await db.user.findMany({ where: { active: true }, orderBy: [{ role: "desc" }, { name: "asc" }] });
+  const sp = await searchParams;
+  const error = typeof sp.erreur === "string" ? ERRORS[sp.erreur] : undefined;
+  const detail = [sp.tenant && `Locataire : ${sp.tenant}`, sp.email && `Compte : ${sp.email}`].filter(Boolean).join(" · ");
+  const demo = demoModeEnabled();
+  const microsoft = microsoftConfigured();
+  const users = demo ? await db.user.findMany({ where: { active: true }, orderBy: [{ role: "desc" }, { name: "asc" }] }) : [];
   const groups = [
     { title: "Commerciaux", list: users.filter((u) => u.role === "SALES") },
     { title: "Direction", list: users.filter((u) => u.role !== "SALES") },
@@ -24,12 +40,30 @@ export default async function LoginPage() {
         </div>
       </div>
 
-      <button disabled className="btn-ghost mb-2 w-full" title="Disponible avec Entra ID">
-        Se connecter avec Microsoft 365
-      </button>
-      <p className="mb-8 text-center text-xs text-zinc-500">Connexion Microsoft bientôt disponible. Mode démo : choisissez un profil.</p>
+      {error && (
+        <div className="mb-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-800">
+          {error}
+          {detail && <p className="mt-1 font-mono text-xs break-all text-rose-700">{detail}</p>}
+        </div>
+      )}
 
-      {groups.map((g) => (
+      {microsoft ? (
+        <a href="/api/auth/login" className="btn-primary mb-2 w-full py-3">
+          <svg viewBox="0 0 21 21" className="h-4 w-4" aria-hidden>
+            <path fill="#f25022" d="M1 1h9v9H1z" /><path fill="#7fba00" d="M11 1h9v9h-9z" /><path fill="#00a4ef" d="M1 11h9v9H1z" /><path fill="#ffb900" d="M11 11h9v9h-9z" />
+          </svg>
+          Se connecter avec Microsoft 365
+        </a>
+      ) : (
+        <button disabled className="btn-ghost mb-2 w-full">Se connecter avec Microsoft 365</button>
+      )}
+      {demo && (
+        <p className="mb-8 text-center text-xs text-zinc-500">
+          {microsoft ? "Mode démo actif : vous pouvez aussi choisir un profil fictif." : "Connexion Microsoft non configurée. Mode démo : choisissez un profil."}
+        </p>
+      )}
+
+      {demo && groups.map((g) => (
         <section key={g.title} className="mb-6">
           <h2 className="label mb-2">{g.title}</h2>
           <div className="card divide-y divide-zinc-100">
@@ -51,7 +85,7 @@ export default async function LoginPage() {
           </div>
         </section>
       ))}
-      {users.length === 0 && (
+      {demo && users.length === 0 && (
         <p className="card p-4 text-sm">Aucun utilisateur. Lancez <code>npm run db:seed</code> pour charger les données de démo.</p>
       )}
     </main>

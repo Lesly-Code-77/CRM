@@ -4,8 +4,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
+import { getSession, requireUser } from "@/lib/auth";
 import { createAnalyzedNote, rejectNote, validateNote } from "@/lib/notes";
+import { pushDraftToOutlook } from "@/lib/outlook";
 
 const noteInput = z.object({
   accountId: z.string().min(1, "Choisissez un client"),
@@ -59,8 +60,27 @@ export async function confirmNote(noteId: string, formData: FormData) {
     updateIds: formData.getAll("update").map(String),
     mentionIds: formData.getAll("mention").map(String),
   });
+
+  // Connecté avec Microsoft : le brouillon est déposé dans Outlook dans la foulée.
+  let outlook = "";
+  const session = await getSession();
+  if (session?.method === "MICROSOFT" && session.msalHomeAccountId && formData.get("emailKeep") === "on") {
+    outlook = await pushDraftToOutlook(db, noteId, user.id, session.msalHomeAccountId);
+  }
   revalidatePath("/app", "layout");
-  redirect(`/app/note/${noteId}?ok=1`);
+  redirect(`/app/note/${noteId}?ok=1${outlook && outlook !== "ok" ? `&outlook=${outlook}` : ""}`);
+}
+
+/** Nouvel essai de création du brouillon Outlook (après une erreur ou une reconnexion). */
+export async function retryOutlookDraft(noteId: string) {
+  const user = await requireUser("sales");
+  const session = await getSession();
+  let outlook = "demo";
+  if (session?.method === "MICROSOFT" && session.msalHomeAccountId) {
+    outlook = await pushDraftToOutlook(db, noteId, user.id, session.msalHomeAccountId);
+  }
+  revalidatePath(`/app/note/${noteId}`);
+  redirect(`/app/note/${noteId}${outlook === "ok" ? "" : `?outlook=${outlook}`}`);
 }
 
 export async function discardNote(noteId: string) {
