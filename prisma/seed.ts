@@ -3,12 +3,14 @@
  * Lancer : npm run db:seed (efface puis recrée les données de l'organisation de démo).
  */
 import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, type AccountType, type AccountStatus } from "../src/generated/prisma/client";
+import type { AccountType, AccountStatus } from "../src/generated/prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client";
 import { createAnalyzedNote, validateNote } from "../src/lib/notes";
 import { DEMO_TRANSCRIPTS } from "../src/lib/demo/transcripts";
+import { startOfDay } from "../src/lib/format";
 
-const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+// Connexion directe si disponible (Supabase), sinon DATABASE_URL
+const db = createPrismaClient(process.env.DIRECT_URL ?? process.env.DATABASE_URL);
 
 // Comptes rendus variés pour l'historique (les clients « à risque » reçoivent la note de réclamation)
 const HISTORY = [
@@ -20,8 +22,7 @@ const HISTORY = [
 ];
 
 const DAY = 24 * 60 * 60 * 1000;
-const today = new Date();
-today.setHours(0, 0, 0, 0);
+const today = startOfDay(); // minuit, heure de Paris
 const at = (days: number, hour = 10, minute = 0) => new Date(today.getTime() + days * DAY + (hour * 60 + minute) * 60 * 1000);
 
 async function main() {

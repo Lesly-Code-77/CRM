@@ -10,8 +10,8 @@ Prérequis : Node.js 20+ et Docker (ou un PostgreSQL 16 déjà installé).
 
 ```bash
 npm install                 # installe les dépendances et génère le client Prisma
-cp .env.example .env        # variables d'environnement
-docker compose up -d        # démarre PostgreSQL
+cp .env.example .env        # variables d'environnement (Windows : copy .env.example .env)
+docker compose up -d        # démarre PostgreSQL (ou utiliser une base Supabase, voir plus bas)
 npm run db:deploy           # crée les tables
 npm run db:seed             # charge les données de démo (fictives)
 npm run dev                 # http://localhost:3000
@@ -27,6 +27,22 @@ Commandes utiles :
 | `npm run db:reset` | remet la base à zéro et recharge la démo |
 | `npx prisma studio` | explorer les données dans le navigateur |
 | `npm run lint` / `npm run typecheck` | vérifications |
+
+## Démo en ligne : Supabase + Netlify
+
+Pour montrer SalesFlow sur smartphone (le micro exige une adresse en HTTPS). Données fictives uniquement : la production restera sur Azure en France.
+
+1. **Supabase** (base de données) : créer un projet en région UE, noter le mot de passe. Bouton **Connect → ORMs → Prisma** : copier `DATABASE_URL` (port 6543) et `DIRECT_URL` (port 5432), ajouter `&sslmode=require` à la fin de chacune.
+2. **Depuis le PC**, dans `.env`, coller ces deux adresses, puis :
+   ```bash
+   npm install
+   npm run db:deploy   # crée les tables dans Supabase
+   npm run db:seed     # charge la démo (à relancer le matin d'une présentation : les rendez-vous sont « aujourd'hui »)
+   ```
+3. **Netlify** : *Add new project → Import an existing project → GitHub →* dépôt `CRM`. Réglages détectés automatiquement (`netlify.toml`). Dans *Environment variables*, ajouter `DATABASE_URL` (celle du port 6543), `DEMO_MODE=true`, `DEMO_ACCESS_CODE=<code choisi>`, puis *Deploy*.
+4. Ouvrir `https://<site>.netlify.app` sur le téléphone, saisir le code, choisir un profil. « Partager → Sur l'écran d'accueil » pour l'avoir comme une appli.
+
+Chaque *Push* sur GitHub redéploie automatiquement. Un projet Supabase gratuit se met en pause après 7 jours sans activité (le relancer depuis le tableau de bord Supabase).
 
 ## Connexion Microsoft 365 (Entra ID)
 

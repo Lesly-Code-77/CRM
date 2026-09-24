@@ -1,8 +1,8 @@
 import { connection } from "next/server";
 import { db } from "@/lib/db";
-import { loginAs } from "@/app/actions/auth";
+import { loginAs, unlockDemo } from "@/app/actions/auth";
 import { initials } from "@/lib/format";
-import { demoModeEnabled } from "@/lib/auth";
+import { demoModeEnabled, demoUnlocked } from "@/lib/auth";
 import { microsoftConfigured } from "@/lib/msal";
 
 const ERRORS: Record<string, string> = {
@@ -11,6 +11,7 @@ const ERRORS: Record<string, string> = {
   session: "La connexion a expiré, veuillez réessayer.",
   microsoft: "Microsoft n'a pas pu confirmer la connexion. Réessayez ou contactez votre administrateur.",
   organisation: "Votre organisation n'est pas encore inscrite sur SalesFlow.",
+  code: "Code d'accès incorrect.",
   utilisateur: "Votre compte n'a pas encore accès à SalesFlow. Demandez à votre responsable de vous ajouter.",
 };
 
@@ -22,8 +23,9 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const error = typeof sp.erreur === "string" ? ERRORS[sp.erreur] : undefined;
   const detail = [sp.tenant && `Locataire : ${sp.tenant}`, sp.email && `Compte : ${sp.email}`].filter(Boolean).join(" · ");
   const demo = demoModeEnabled();
+  const unlocked = demo && (await demoUnlocked());
   const microsoft = microsoftConfigured();
-  const users = demo ? await db.user.findMany({ where: { active: true }, orderBy: [{ role: "desc" }, { name: "asc" }] }) : [];
+  const users = unlocked ? await db.user.findMany({ where: { active: true }, orderBy: [{ role: "desc" }, { name: "asc" }] }) : [];
   const groups = [
     { title: "Commerciaux", list: users.filter((u) => u.role === "SALES") },
     { title: "Direction", list: users.filter((u) => u.role !== "SALES") },
@@ -63,7 +65,17 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
         </p>
       )}
 
-      {demo && groups.map((g) => (
+      {demo && !unlocked && (
+        <form action={unlockDemo} className="card mb-6 space-y-3 p-4">
+          <label className="block">
+            <span className="label">Code d&apos;accès à la démo</span>
+            <input name="code" type="password" required autoComplete="off" className="input mt-1" placeholder="Code communiqué par SalesFlow" />
+          </label>
+          <button className="btn-primary w-full">Accéder à la démo</button>
+        </form>
+      )}
+
+      {unlocked && groups.map((g) => (
         <section key={g.title} className="mb-6">
           <h2 className="label mb-2">{g.title}</h2>
           <div className="card divide-y divide-zinc-100">
@@ -85,7 +97,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           </div>
         </section>
       ))}
-      {demo && users.length === 0 && (
+      {unlocked && users.length === 0 && (
         <p className="card p-4 text-sm">Aucun utilisateur. Lancez <code>npm run db:seed</code> pour charger les données de démo.</p>
       )}
     </main>

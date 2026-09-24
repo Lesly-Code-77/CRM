@@ -8,10 +8,11 @@
  * L'organisation par défaut est la première créée (en local : « Démo Sportswear »).
  */
 import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, type Role } from "../src/generated/prisma/client";
+import type { Role } from "../src/generated/prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client";
 
-const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+// Connexion directe si disponible (Supabase), sinon DATABASE_URL
+const db = createPrismaClient(process.env.DIRECT_URL ?? process.env.DATABASE_URL);
 
 function takeOrg(args: string[]) {
   const i = args.indexOf("--org");

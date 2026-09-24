@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { toggleTask } from "@/app/actions/sales";
-import { fmtDate, PRIORITY } from "@/lib/format";
+import { fmtDate, PRIORITY, startOfDay } from "@/lib/format";
 
 type T = {
   id: string;
@@ -15,7 +15,7 @@ type T = {
 
 export function TaskRow({ task, clientHref = "/app/clients" }: { task: T; clientHref?: string }) {
   const done = task.status === "FAITE";
-  const overdue = !done && task.dueDate && task.dueDate < new Date(new Date().setHours(0, 0, 0, 0));
+  const overdue = !done && task.dueDate && task.dueDate < startOfDay();
   return (
     <li className="flex items-start gap-3 px-4 py-3">
       <form action={toggleTask.bind(null, task.id)}>

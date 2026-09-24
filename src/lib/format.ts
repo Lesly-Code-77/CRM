@@ -17,11 +17,27 @@ export function daysSince(d: Date | null | undefined) {
   return Math.floor((Date.now() - d.getTime()) / 86_400_000);
 }
 
+/** Heure « murale » à Paris d'un instant, exprimée comme si c'était de l'UTC (pour calculer le décalage). */
+function parisWallAsUtc(ms: number) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    })
+      .formatToParts(new Date(ms))
+      .map((x) => [x.type, Number(x.value)]),
+  );
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+}
+
+/**
+ * Minuit à Paris (aujourd'hui + offsetDays), quel que soit le fuseau du serveur
+ * (Netlify et Azure tournent en UTC).
+ */
 export function startOfDay(offsetDays = 0) {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + offsetDays);
-  return d;
+  const now = Date.now();
+  const wall = new Date(parisWallAsUtc(now));
+  const guess = Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate() + offsetDays);
+  return new Date(guess - (parisWallAsUtc(guess) - guess));
 }
 
 export const ACCOUNT_STATUS: Record<string, { label: string; cls: string }> = {

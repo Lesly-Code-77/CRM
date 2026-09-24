@@ -1,0 +1,6 @@
+# Déploiement de la démo sur Netlify (Next.js détecté automatiquement)
+[build]
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
