@@ -1,0 +1,320 @@
+// Schéma de données SalesFlow (MVP)
+// Multi-client dès le départ : chaque donnée appartient à une Organization (un client SalesFlow).
+// Les identifiants Dynamics 365 F&O (n° de compte client, référence article) sont stockés dès la phase 1.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Organisation & utilisateurs ─────────────────────────────
+
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  entraTenantId String?  @unique // Tenant Microsoft 365 du client
+  createdAt     DateTime @default(now())
+
+  users      User[]
+  accounts   Account[]
+  products   Product[]
+  tasks      Task[]
+  auditLogs  AuditLog[]
+}
+
+enum Role {
+  SALES     // commercial
+  MANAGER   // accès direction
+  ADMIN     // administrateur côté client
+}
+
+model User {
+  id            String   @id @default(cuid())
+  orgId         String
+  email         String
+  name          String
+  role          Role     @default(SALES)
+  region        String?
+  entraObjectId String?  @unique // oid Entra ID, rempli à la première connexion Microsoft
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  accounts      Account[]    @relation("AccountOwner")
+  visits        Visit[]
+  voiceNotes    VoiceNote[]
+  tasksAssigned Task[]       @relation("TaskAssignee")
+  tasksCreated  Task[]       @relation("TaskCreator")
+  auditLogs     AuditLog[]
+
+  @@unique([orgId, email])
+}
+
+// ───────────────────────────── Clients (revendeurs) ─────────────────────────────
+
+enum AccountType {
+  MAGASIN
+  CHAINE
+  DISTRIBUTEUR
+}
+
+enum AccountStatus {
+  PROSPECT
+  ACTIF
+  A_RISQUE
+  INACTIF
+}
+
+model Account {
+  id              String        @id @default(cuid())
+  orgId           String
+  ownerId         String?       // commercial responsable
+  name            String
+  type            AccountType   @default(MAGASIN)
+  status          AccountStatus @default(ACTIF)
+  foAccountNumber String?       // n° de compte client Dynamics 365 F&O
+  address         String?
+  city            String?
+  postalCode      String?
+  phone           String?
+  notes           String?       // informations clés, mises à jour après validation
+  lastVisitAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner           User?            @relation("AccountOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  contacts        Contact[]
+  visits          Visit[]
+  voiceNotes      VoiceNote[]
+  tasks           Task[]
+  updates         AccountUpdate[]
+  productMentions ProductMention[]
+
+  @@unique([orgId, foAccountNumber])
+  @@index([orgId, ownerId])
+}
+
+model Contact {
+  id             String   @id @default(cuid())
+  accountId      String
+  firstName      String
+  lastName       String
+  jobTitle       String?
+  email          String?
+  phone          String?
+  isPrimary      Boolean  @default(false)
+  graphContactId String?  // contact Outlook correspondant
+  createdAt      DateTime @default(now())
+
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  orgId        String
+  foItemNumber String   // référence article Dynamics 365 F&O
+  name         String
+  category     String?
+  collection   String?  // ex. "Printemps-Été 2027"
+
+  org          Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  mentions     ProductMention[]
+
+  @@unique([orgId, foItemNumber])
+}
+
+// ───────────────────────────── Visites & notes vocales ─────────────────────────────
+
+enum VisitType {
+  VISITE
+  TELEPHONE
+  VISIO
+  SALON
+}
+
+enum VisitStatus {
+  PLANIFIEE
+  REALISEE
+  ANNULEE
+}
+
+model Visit {
+  id             String      @id @default(cuid())
+  accountId      String
+  userId         String
+  type           VisitType   @default(VISITE)
+  status         VisitStatus @default(PLANIFIEE)
+  startsAt       DateTime
+  summary        String?
+  outlookEventId String?     // événement du calendrier Outlook (Graph Calendars.Read)
+  createdAt      DateTime    @default(now())
+
+  account        Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  voiceNotes     VoiceNote[]
+
+  @@index([userId, startsAt])
+}
+
+enum VoiceNoteStatus {
+  RECUE        // audio reçu
+  TRANSCRITE   // transcription disponible
+  A_VALIDER    // analyse IA prête, en attente de validation humaine
+  VALIDEE      // le commercial a validé : actions exécutées
+  REJETEE      // le commercial a tout rejeté
+}
+
+model VoiceNote {
+  id          String          @id @default(cuid())
+  userId      String
+  accountId   String
+  visitId     String?
+  status      VoiceNoteStatus @default(RECUE)
+  durationSec Int?
+  audioPath   String?         // stockage blob (Azure) ; l'audio est supprimé après transcription
+  transcript  String?
+  summary     String?         // résumé produit par l'IA
+  aiRaw       Json?           // sortie JSON brute de l'IA, pour traçabilité
+  validatedAt DateTime?
+  createdAt   DateTime        @default(now())
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account         Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  visit           Visit?           @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  emailDraft      EmailDraft?
+  tasks           Task[]
+  accountUpdates  AccountUpdate[]
+  productMentions ProductMention[]
+
+  @@index([userId, status])
+}
+
+// ───────────────────────────── Propositions de l'IA ─────────────────────────────
+
+enum ProposalStatus {
+  PROPOSEE
+  ACCEPTEE
+  REJETEE
+}
+
+enum EmailDraftStatus {
+  PROPOSE
+  VALIDE            // validé par le commercial
+  BROUILLON_OUTLOOK // brouillon créé dans Outlook (Graph Mail.ReadWrite) — jamais envoyé par SalesFlow
+  ABANDONNE
+}
+
+model EmailDraft {
+  id             String           @id @default(cuid())
+  voiceNoteId    String           @unique
+  toEmail        String?
+  toName         String?
+  subject        String
+  body           String
+  status         EmailDraftStatus @default(PROPOSE)
+  graphMessageId String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  voiceNote      VoiceNote        @relation(fields: [voiceNoteId], references: [id], onDelete: Cascade)
+}
+
+model AccountUpdate {
+  id          String         @id @default(cuid())
+  voiceNoteId String
+  accountId   String
+  field       String         // ex. "notes", "status", "phone"
+  label       String         // libellé lisible : « Statut du client »
+  oldValue    String?
+  newValue    String
+  status      ProposalStatus @default(PROPOSEE)
+  createdAt   DateTime       @default(now())
+
+  voiceNote   VoiceNote      @relation(fields: [voiceNoteId], references: [id], onDelete: Cascade)
+  account     Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+model ProductMention {
+  id          String         @id @default(cuid())
+  voiceNoteId String
+  accountId   String
+  productId   String?        // rapproché du catalogue si possible
+  rawLabel    String         // ce que le commercial a dit
+  quantity    Int?
+  intent      String?        // ex. "réassort", "intérêt", "réclamation"
+  status      ProposalStatus @default(PROPOSEE)
+
+  voiceNote   VoiceNote      @relation(fields: [voiceNoteId], references: [id], onDelete: Cascade)
+  account     Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  product     Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+}
+
+// ───────────────────────────── Tâches ─────────────────────────────
+
+enum TaskStatus {
+  PROPOSEE  // suggérée par l'IA, pas encore validée
+  A_FAIRE
+  FAITE
+  ANNULEE
+}
+
+enum TaskPriority {
+  BASSE
+  NORMALE
+  HAUTE
+}
+
+enum TaskSource {
+  NOTE_VOCALE
+  MANUELLE
+  DIRECTION
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  orgId       String
+  title       String
+  details     String?
+  dueDate     DateTime?
+  priority    TaskPriority @default(NORMALE)
+  status      TaskStatus   @default(A_FAIRE)
+  source      TaskSource   @default(MANUELLE)
+  assigneeId  String
+  createdById String
+  accountId   String?
+  voiceNoteId String?
+  graphTodoId String?      // tâche Microsoft To Do (optionnel)
+  completedAt DateTime?
+  createdAt   DateTime     @default(now())
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assignee    User         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  createdBy   User         @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  account     Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  voiceNote   VoiceNote?   @relation(fields: [voiceNoteId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, assigneeId, status])
+}
+
+// ───────────────────────────── Journal (RGPD / traçabilité) ─────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String?
+  action    String   // ex. "voice_note.validated", "task.created"
+  entity    String
+  entityId  String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user      User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+}
